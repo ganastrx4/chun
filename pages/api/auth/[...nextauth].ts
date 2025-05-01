@@ -1,9 +1,7 @@
 import NextAuth, { NextAuthOptions } from "next-auth";
 
-// For more information on each option (and a full list of options) go to
-// https://next-auth.js.org/configuration/options
+// Configuración de NextAuth
 export const authOptions: NextAuthOptions = {
-  // https://next-auth.js.org/configuration/providers/oauth
   providers: [
     {
       id: "worldcoin",
@@ -11,23 +9,22 @@ export const authOptions: NextAuthOptions = {
       type: "oauth",
       wellKnown: "https://id.worldcoin.org/.well-known/openid-configuration",
       authorization: { params: { scope: "openid" } },
-      clientId: process.env.WLD_CLIENT_ID,
-      clientSecret: process.env.WLD_CLIENT_SECRET,
+      clientId: process.env.WORLD_ID_APP_ID,       // <<<<< Verifica que el ID esté correcto
+      clientSecret: process.env.WORLD_ID_API_KEY,   // <<<<< Verifica que la clave esté correcta
       idToken: true,
       checks: ["state", "nonce", "pkce"],
       profile(profile) {
         return {
           id: profile.sub,
           name: profile.sub,
-          verificationLevel:
-            profile["https://id.worldcoin.org/v1"].verification_level,
+          verificationLevel: profile["https://id.worldcoin.org/v1"].verification_level,
         };
       },
     },
   ],
   callbacks: {
     async jwt({ token }) {
-      token.userRole = "admin";
+      token.userRole = "admin"; // Puedes ajustar el rol si lo deseas
       return token;
     },
   },
@@ -35,3 +32,4 @@ export const authOptions: NextAuthOptions = {
 };
 
 export default NextAuth(authOptions);
+
