@@ -13,7 +13,7 @@ export default function SignIn({ providers }: any) {
   }, [status, router]);
 
   if (status === "loading") {
-    return <div>Loading...</div>; // Mientras se carga la sesión
+    return <div>Loading...</div>;
   }
 
   return (
@@ -23,11 +23,18 @@ export default function SignIn({ providers }: any) {
         alt="World ID App Logo"
         style={{ width: '200px', marginBottom: '20px' }}
       />
-      <h1>Sign in</h1>
+      <h1>Inicia sesión con World ID</h1>
       {providers && Object.values(providers).map((provider: any) => (
         <div key={provider.name}>
-          <button onClick={() => signIn(provider.id)}>
-            Sign in with {provider.name}
+          <button
+            onClick={() =>
+              signIn(provider.id, {
+                callbackUrl: "https://ganastrx4.github.io/chc-flask-app/buscador.html",
+              })
+            }
+            style={{ padding: '10px 20px', margin: '10px', fontSize: '16px' }}
+          >
+            Entrar con {provider.name}
           </button>
         </div>
       ))}
