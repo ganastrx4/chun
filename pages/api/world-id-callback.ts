@@ -12,7 +12,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   console.log('✅ Proof recibido:', body);
 
   // Luego lo mandas a tu backend Flask (ajusta la URL de ngrok si cambió)
-  const flaskRes = await fetch('https://good-muskox-rich.ngrok-free.app/verify-proof', {
+  const flaskRes = await fetch('https://chun-drab.vercel.app/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
