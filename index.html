@@ -1,76 +1,58 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <title>IA Futurista Auth</title>
+  <meta charset="UTF-8">
+  <title>Autenticación World ID</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
   <style>
     body {
-      margin: 0;
-      background: linear-gradient(135deg, #0f0f0f, #0a0a0a);
-      font-family: 'Orbitron', sans-serif;
-      color: #0ff;
+      background: linear-gradient(135deg, #000428, #004e92);
+      color: white;
+      text-align: center;
+      font-family: 'Arial', sans-serif;
       overflow: hidden;
     }
-    .splash {
-      position: fixed;
-      top: 0; left: 0;
-      width: 100%; height: 100%;
-      background: black;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-direction: column;
-      z-index: 999;
-      animation: fadeOut 2s ease-out 3s forwards;
+    .fade-in {
+      animation: fadeIn 1s ease-in-out forwards;
     }
-    .splash img {
-      max-width: 80%;
-      border-radius: 20px;
-      box-shadow: 0 0 30px #0ff;
-    }
-    @keyframes fadeOut {
-      to {
-        opacity: 0;
-        visibility: hidden;
-      }
-    }
-    iframe {
-      border: none;
-      width: 100%;
-      height: 100vh;
-    }
-    .loading-text {
-      margin-top: 20px;
-      font-size: 18px;
-      color: #0ff;
-      text-shadow: 0 0 5px #0ff;
+    @keyframes fadeIn {
+      from { opacity: 0; transform: scale(0.95); }
+      to { opacity: 1; transform: scale(1); }
     }
   </style>
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap" rel="stylesheet">
 </head>
-<body>
+<body class="flex flex-col justify-center items-center min-h-screen">
 
-  <div class="splash">
-    <img src="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEgs4uyyEce9czJNopvAJUC-EuqRY0GilYfi7dguE0OEkUjTcrn6PVYsIFXo2NbemRvavHvVWsD8ru9ZGJXUpfhSVsUyrNYeJri7NP2XU6-9NUjbyrVjQtYUNjt7N9dUaouupuqlczAJlDqpYVhdArBcT7MRvEAwVfQv8JeOKD-EWAecMuSsfAE4gizyojtT/s1024-rw/0ed01250-9b4a-4d44-924c-7c0011004aa0.webp" alt="Cargando IA...">
-    <div class="loading-text">Iniciando Autenticación de Identidad Cuántica...</div>
-  </div>
+  <img src="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEgs4uyyEce9czJNopvAJUC-EuqRY0GilYfi7dguE0OEkUjTcrn6PVYsIFXo2NbemRvavHvVWsD8ru9ZGJXUpfhSVsUyrNYeJri7NP2XU6-9NUjbyrVjQtYUNjt7N9dUaouupuqlczAJlDqpYVhdArBcT7MRvEAwVfQv8JeOKD-EWAecMuSsfAE4gizyojtT/s1024-rw/0ed01250-9b4a-4d44-924c-7c0011004aa0.webp"
+       alt="Logo" class="w-64 mb-8 rounded-xl shadow-xl fade-in">
 
-  <div id="authFrame" style="display:none;">
-    <iframe src="https://worldcoin.org/verify?t=wld&i=aba7550e-ac5b-4dbc-b1dc-35f0fcd5c608&k=3rsW5InyL4HxkCr0DJm4Oi4P6Fe%2FrZeEX5PY7ZhhuQ0%3D"></iframe>
-  </div>
+  <h1 class="text-4xl font-bold mb-6 fade-in">Verifica tu identidad en World App</h1>
+  <p class="mb-6 fade-in">Accede a tu cuenta de forma segura y privada.</p>
+
+  <button onclick="startAuth()"
+    class="bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold py-3 px-8 rounded-2xl shadow-lg hover:scale-105 transition fade-in">
+    🔒 Autenticar con World App
+  </button>
 
   <script>
-    // Mostrar iframe tras splash de 3.5 segundos
-    setTimeout(() => {
-      document.querySelector('.splash').style.display = 'none';
-      document.getElementById('authFrame').style.display = 'block';
+    function startAuth() {
+      const clientId = "app_7686f9027d3e3c0b53d987a3caf1e111";
+      const redirectUri = "https://ganastrx4.github.io/chc-flask-app-/buscador.html";
+      const state = Math.random().toString(36).substring(2);
+      const scope = "openid";
+      const responseType = "token id_token";
+      const nonce = Math.random().toString(36).substring(2);
+      const authUrl = `https://id.worldcoin.org/authorize?` +
+        `client_id=${clientId}` +
+        `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+        `&response_type=${encodeURIComponent(responseType)}` +
+        `&scope=${encodeURIComponent(scope)}` +
+        `&state=${state}` +
+        `&nonce=${nonce}`;
 
-      // Auto-redireccionar tras 12 segundos (haya autenticado o no)
-      setTimeout(() => {
-        window.location.href = "https://ganastrx4.github.io/chc-flask-app/buscador.html";
-      }, 12000);
-
-    }, 3500);
+      window.location.href = authUrl;
+    }
   </script>
 
 </body>
