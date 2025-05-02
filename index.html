@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>IA Futurista Auth</title>
+  <style>
+    body {
+      margin: 0;
+      background: linear-gradient(135deg, #0f0f0f, #0a0a0a);
+      font-family: 'Orbitron', sans-serif;
+      color: #0ff;
+      overflow: hidden;
+    }
+    .splash {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: black;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      z-index: 999;
+      animation: fadeOut 2s ease-out 3s forwards;
+    }
+    .splash img {
+      max-width: 80%;
+      border-radius: 20px;
+      box-shadow: 0 0 30px #0ff;
+    }
+    @keyframes fadeOut {
+      to {
+        opacity: 0;
+        visibility: hidden;
+      }
+    }
+    iframe {
+      border: none;
+      width: 100%;
+      height: 100vh;
+    }
+    .loading-text {
+      margin-top: 20px;
+      font-size: 18px;
+      color: #0ff;
+      text-shadow: 0 0 5px #0ff;
+    }
+  </style>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <div class="splash">
+    <img src="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEgs4uyyEce9czJNopvAJUC-EuqRY0GilYfi7dguE0OEkUjTcrn6PVYsIFXo2NbemRvavHvVWsD8ru9ZGJXUpfhSVsUyrNYeJri7NP2XU6-9NUjbyrVjQtYUNjt7N9dUaouupuqlczAJlDqpYVhdArBcT7MRvEAwVfQv8JeOKD-EWAecMuSsfAE4gizyojtT/s1024-rw/0ed01250-9b4a-4d44-924c-7c0011004aa0.webp" alt="Cargando IA...">
+    <div class="loading-text">Iniciando Autenticación de Identidad Cuántica...</div>
+  </div>
+
+  <div id="authFrame" style="display:none;">
+    <iframe src="https://worldcoin.org/verify?t=wld&i=aba7550e-ac5b-4dbc-b1dc-35f0fcd5c608&k=3rsW5InyL4HxkCr0DJm4Oi4P6Fe%2FrZeEX5PY7ZhhuQ0%3D"></iframe>
+  </div>
+
+  <script>
+    // Mostrar iframe tras splash de 3.5 segundos
+    setTimeout(() => {
+      document.querySelector('.splash').style.display = 'none';
+      document.getElementById('authFrame').style.display = 'block';
+
+      // Auto-redireccionar tras 12 segundos (haya autenticado o no)
+      setTimeout(() => {
+        window.location.href = "https://ganastrx4.github.io/chc-flask-app/buscador.html";
+      }, 12000);
+
+    }, 3500);
+  </script>
+
+</body>
+</html>
