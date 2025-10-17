@@ -5,6 +5,7 @@
   <title>Autenticación World ID</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <script src="https://cdn.worldcoin.org/app/v1.0/sdk.js"></script>
   <style>
     body {
       background: linear-gradient(135deg, #000428, #004e92);
@@ -30,29 +31,47 @@
   <h1 class="text-4xl font-bold mb-6 fade-in">Verifica tu identidad en World App</h1>
   <p class="mb-6 fade-in">Accede a tu cuenta de forma segura y privada.</p>
 
-  <button onclick="startAuth()"
-    class="bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold py-3 px-8 rounded-2xl shadow-lg hover:scale-105 transition fade-in">
-    🔒 Autenticar con World App
-  </button>
+  <!-- Contenedor del botón de World ID -->
+  <div id="world-id-container" class="fade-in"></div>
 
   <script>
-    function startAuth() {
-      const clientId = "app_7686f9027d3e3c0b53d987a3caf1e111";
-      const redirectUri = "https://worldcoin.org/verify?t=wld&i=8c724111-a9c4-4cc4-886e-cb5c2b7280b6&k=87JwnJs2dflZP0aOpbN0E9FJJ7DFvKICP0NmV2HGRkc%3D";
-      const state = Math.random().toString(36).substring(2);
-      const scope = "openid";
-      const responseType = "token id_token";
-      const nonce = Math.random().toString(36).substring(2);
-      const authUrl = `https://id.worldcoin.org/authorize?` +
-        `client_id=${clientId}` +
-        `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-        `&response_type=${encodeURIComponent(responseType)}` +
-        `&scope=${encodeURIComponent(scope)}` +
-        `&state=${state}` +
-        `&nonce=${nonce}`;
+    const client_id = "app_7686f9027d3e3c0b53d987a3caf1e111"; // Tu app_id real
+    const verify_url = "https://worldid-auth-fzky.onrender.com/api/verify"; // Tu backend Flask en Render
 
-      window.location.href = authUrl;
-    }
+    window.onload = async () => {
+      try {
+        // Inicializa el widget IDKit
+        const worldID = window.WorldID.init({
+          app_id: client_id,
+          action_id: "login-chun",
+          signal: "auth",
+          verification_level: "orb", // o "device" si usas World App
+          container_id: "world-id-container",
+          on_success: async (proof) => {
+            // Enviamos la prueba a tu backend Flask
+            const res = await fetch(verify_url, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(proof),
+            });
+            const data = await res.json();
+            if (data.success) {
+              alert("✅ Verificación exitosa: " + data.message);
+            } else {
+              alert("❌ Error: " + data.message);
+            }
+          },
+          on_error: (err) => {
+            console.error("Error:", err);
+            alert("Error al autenticar con World ID");
+          },
+        });
+
+        console.log("✅ IDKit inicializado correctamente");
+      } catch (err) {
+        console.error("Fallo al inicializar World ID:", err);
+      }
+    };
   </script>
 
 </body>
