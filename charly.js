@@ -1,6 +1,6 @@
 // ===============================================================
-// 🧠 CRASH ANALYZER + AUTO BET v4.3 MEMORIA PRO 
-// (Mediana -0.22 + Alta Volatilidad -20% + Stop Automático + Apuesta 1.01–1.76)
+// 🧠 CRASH ANALYZER + AUTO BET v4.4 REGLAS DINÁMICAS
+// (Reglas personalizadas + Memoria + Stop automático)
 // Autor: Charly UNAM & GPT-5
 // ===============================================================
 
@@ -64,22 +64,6 @@ function calculateAdjustedAverage() {
   return { avg, median };
 }
 
-// === Indicadores extendidos ===
-function getExtendedIndicators() {
-  if (historyValues.length < 5) return null;
-  const diffs = [];
-  for (let i = 1; i < historyValues.length; i++) diffs.push(historyValues[i] - historyValues[i - 1]);
-
-  const avgDiff = diffs.reduce((a, b) => a + b, 0) / diffs.length;
-  const upCount = diffs.filter(d => d > 0).length;
-  const downCount = diffs.filter(d => d < 0).length;
-  const volatility = Math.sqrt(diffs.map(d => d ** 2).reduce((a, b) => a + b, 0) / diffs.length);
-  const momentum = upCount / (upCount + downCount);
-  const trend = avgDiff > 0 ? "📈 Tendencia al alza" : "📉 Tendencia a la baja";
-
-  return { avgDiff, volatility, momentum, trend };
-}
-
 // === Analiza memoria ===
 function checkMemoryPattern(currentIndicators) {
   if (highVolatilityMemory.length < 5) return false;
@@ -102,123 +86,67 @@ function getStats() {
     .map(v => Math.pow(v - avg, 2))
     .reduce((a, b) => a + b, 0) / historyValues.length;
   const stdDev = Math.sqrt(variance);
-  const indicators = getExtendedIndicators();
-  if (!indicators) return;
-
-  // ⚡ Alta volatilidad detectada
-  if (indicators.volatility > 10) {
-    const volValue = indicators.volatility;
-    console.log("🚨 Alta volatilidad detectada:", volValue.toFixed(2));
-
-    highVolatilityMemory.push({
-      timestamp: Date.now(),
-      volatility: volValue,
-      result: historyValues[0] || 0,
-    });
-    if (highVolatilityMemory.length > 10) highVolatilityMemory.shift();
-
-    highVolatilityDetected = true;
-    lastHighVolatility = volValue;
-    historyValues = [];
-    expectedNext = null;
-    return;
-  } else {
-    highVolatilityDetected = false;
-    lastHighVolatility = null;
-  }
-
-  expectedNext = avg + (Math.random() - 0.5) * stdDev;
-  if (expectedNext <= 1) expectedNext = null;
 
   console.log("📊 Estadísticas actuales:");
   console.log(`• Promedio ajustado: ${avg.toFixed(2)}x`);
   console.log(`• Mediana: ${median.toFixed(2)}x`);
   console.log(`• Desviación estándar: ${stdDev.toFixed(2)}`);
-  console.log(`• Volatilidad: ${indicators.volatility.toFixed(2)}`);
-  console.log(`• Momentum: ${(indicators.momentum * 100).toFixed(1)}%`);
-  console.log(`• ${indicators.trend}`);
   console.log("--------------------------------------------------");
-
-  window.lastIndicators = indicators;
 }
 
-// === Apuesta automática inteligente (v4.3 con stop y fallback) ===
+// === Apuesta automática según NUEVAS REGLAS personalizadas ===
 function autoBetSmart() {
   if (stopAutoBet) return console.warn("🛑 AutoBet detenido manualmente.");
-  const ind = window.lastIndicators;
 
-  // ⚡ Alta volatilidad → apuesta y fija cashout
-  if (highVolatilityDetected && lastHighVolatility) {
-    let apuesta = lastHighVolatility * 0.5;
-    if (apuesta > 100) apuesta = 100;
-    if (apuesta < 1.01) apuesta = 1.01;
-    apuesta = parseFloat(apuesta.toFixed(2));
+  const last = gameState.lastCrash || 0;
+  let apuesta = 1.01; // valor por defecto
 
-    const betButton = getBetButton();
-    if (!betButton) return console.warn("⚠️ No se encontró el botón BET.");
-
-    if (!autoBetActive) {
-      autoBetActive = true;
-      currentTarget = apuesta;
-      console.log(`⚡ Alta volatilidad → apuesta en ${apuesta}x (80% de ${lastHighVolatility.toFixed(2)})`);
-      betButton.click();
-      console.log(`🎰 Apuesta colocada automáticamente (alta volatilidad). Cashout en ${apuesta}x.`);
-    }
-    return;
+  // === Reglas personalizadas ===
+  if (last === 1.0) {
+    apuesta = parseFloat((1.01 + Math.random() * (10 - 1.01)).toFixed(2));
+    console.log(`🎯 Regla 1: Último crash fue 1.0 → próxima apuesta entre 1.01–10 → ${apuesta}x`);
   }
 
-  // 🚫 Si no hay datos válidos
-  if (!ind || !expectedNext || expectedNext <= 1) {
-    console.log("⚠️ Valor esperado o indicadores no aptos para apostar.");
-    return;
+  else if (last < 2 && last > 0) {
+    const prev = historyValues[1] || 0;
+
+    // Si el anterior también fue menor a 2 → menor a 3
+    if (prev < 2 && prev > 0) {
+      apuesta = parseFloat((1.01 + Math.random() * (3 - 1.01)).toFixed(2));
+      console.log(`⚠️ Doble crash <2 → próxima apuesta menor a 3 (${apuesta}x)`);
+    } 
+    else {
+      apuesta = parseFloat((1.01 + Math.random() * (5 - 1.01)).toFixed(2));
+      console.log(`📉 Último crash <2 → próxima apuesta entre 1.01–5 (${apuesta}x)`);
+    }
   }
 
-  const momentumPercent = ind.momentum * 100;
-  const similarPattern = checkMemoryPattern(ind);
-  const condNormal = momentumPercent >= 40 && ind.volatility <= 5;
-  const condMemoria = similarPattern;
-
-  // 🚫 NUEVA REGLA: si no hay condiciones favorables → apuesta segura 1.01–1.76
-  if (!condNormal && !condMemoria) {
-    // Calcula promedio de últimos 10 valores menores a 2
-    const lowVals = historyValues.filter(v => v < 2).slice(0, 10);
-    let apuesta = 1.2; // Valor base si no hay suficientes
-    if (lowVals.length > 0) {
-      apuesta = lowVals.reduce((a, b) => a + b, 0) / lowVals.length;
-    }
-
-    // Limita entre 1.01 y 1.76
-    if (apuesta < 1.01) apuesta = 1.01;
-    if (apuesta > 1.76) apuesta = 1.76;
-    apuesta = parseFloat(apuesta.toFixed(2));
-
-    const betButton = getBetButton();
-    if (!betButton) return console.warn("⚠️ No se encontró el botón BET.");
-
-    if (!autoBetActive) {
-      autoBetActive = true;
-      currentTarget = apuesta;
-      console.log(`🤖 Condiciones no favorables → apuesta segura en ${apuesta}x (media de ${lowVals.length} bajos <2).`);
-      betButton.click();
-      console.log(`🎰 Apuesta colocada automáticamente (modo seguro). Cashout planificado en ${apuesta}x.`);
-    }
-    return;
+  else if (last >= 2) {
+    apuesta = parseFloat((last + 0.01).toFixed(2));
+    console.log(`📈 Último crash >2 → próxima apuesta será ${apuesta}x`);
   }
 
-  // ✅ Condiciones normales o de memoria
-  let apuesta = lastMedian - 0.22;
-  if (apuesta < 1.01) apuesta = 1.01;
-  apuesta = parseFloat(apuesta.toFixed(2));
+  // Ajuste adicional: si sale menor a 2 (excepto la primera regla)
+  if (last < 2 && last !== 1.0) {
+    apuesta = parseFloat((Math.max(1.01, last - 0.10)).toFixed(2));
+    console.log(`🔧 Ajuste: Último crash menor a 2 → apuesta = ${apuesta}x`);
+  }
 
+  // === Esperar a que salga un número >2 antes de apostar nuevamente ===
+  if (last < 2) {
+    console.log("⏸️ Esperando a que salga un número mayor a 2 antes de volver a apostar...");
+    return; // no apostar aún
+  }
+
+  // === Ejecutar apuesta ===
   const betButton = getBetButton();
   if (!betButton) return console.warn("⚠️ No se encontró el botón BET.");
 
   if (!autoBetActive) {
     autoBetActive = true;
     currentTarget = apuesta;
-    console.log(`🎯 Apuesta configurada en ${apuesta}x (mediana ${lastMedian.toFixed(2)} - 0.22)`);
+    console.log(`🎰 Apuesta automática configurada en ${apuesta}x (según reglas personalizadas).`);
     betButton.click();
-    console.log(`🎰 Apuesta colocada automáticamente (${condMemoria ? "por patrón aprendido" : "condición normal"}). Cashout en ${apuesta}x.`);
   }
 }
 
@@ -284,8 +212,8 @@ function startCrashAnalyzer() {
     console.warn("🛑 Analizador detenido.");
     return;
   }
-  console.log("✅ CRASH ANALYZER + AUTO BET v4.3 MEMORIA PRO iniciado.");
-  console.log("⚙️ Reglas: Mediana -0.22 | Alta Volatilidad -20% | Fallback 1.01–1.76 | Cashout automático");
+  console.log("✅ CRASH ANALYZER + AUTO BET v4.4 REGLAS DINÁMICAS iniciado.");
+  console.log("⚙️ Reglas: Personalizadas por Charly | Espera >2x antes de apostar | Cashout automático");
   monitorCrashCycle();
 }
 
