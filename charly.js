@@ -1,8 +1,7 @@
 // ===============================================================
-// 🧠 CRASH ANALYZER + AUTO BET v4.4 ULTRA INTELIGENTE
-// (Probabilidad + Regresión + Confianza + Ciclo Adaptativo + Rebate Control)
-// Autor: Charly UNAM
-// DONACIONES: Tether TRC20 (USDT) TYQFZCGEffQvPMqQD5pHszbP4r1uzZbVDT
+// 🧠 CRASH ANALYZER + AUTO BET v4.5 ULTRA INTELIGENTE
+// (Modo Adaptativo Mixto + Probabilidad + Regresión + Confianza + Ciclo)
+// Autor: Charly UNAM & GPT-5
 // ===============================================================
 
 // === Variables globales ===
@@ -171,51 +170,69 @@ function getStats() {
   window.lastIndicators = indicators;
 }
 
-// === Apuesta automática inteligente v4.4 ===
+// === Apuesta automática inteligente v4.5 — Modo Adaptativo Mixto ===
 function autoBetSmart() {
   if (stopAutoBet) return console.warn("🛑 AutoBet detenido manualmente.");
   const ind = window.lastIndicators;
   const betButton = getBetButton();
   if (!betButton) return console.warn("⚠️ No se encontró el botón BET.");
 
-  // ⚡ Alta volatilidad
+  // 🚨 Alta volatilidad → estrategia conservadora
   if (highVolatilityDetected && lastHighVolatility) {
     let apuesta = lastHighVolatility * 0.5;
-    apuesta = Math.min(Math.max(apuesta, 1.01), 100);
+    apuesta = Math.min(Math.max(apuesta, 1.5), 8.0);
     apuesta = parseFloat(apuesta.toFixed(2));
     if (!autoBetActive) {
       autoBetActive = true;
       currentTarget = apuesta;
-      console.log(`⚡ Alta volatilidad → apuesta ${apuesta}x`);
+      console.log(`⚡ Alta volatilidad → apuesta ${apuesta}x (modo defensivo)`);
       betButton.click();
     }
     return;
   }
 
-  // 🚫 Sin datos suficientes
+  // 🧩 Datos insuficientes
   if (!ind || !expectedNext || expectedNext <= 1) {
-    console.log("⚠️ Sin datos suficientes para apostar.");
+    console.log("⚠️ Datos insuficientes, usando modo mini-apuesta (1.10x)");
+    if (!autoBetActive) {
+      autoBetActive = true;
+      currentTarget = 1.10;
+      betButton.click();
+    }
     return;
   }
 
+  // 📊 Lógica adaptativa (modo mixto)
   const probs = getCrashProbabilities();
   const trendDirection = linearPrediction();
-  const similarPattern = checkMemoryPattern(ind);
   let apuesta = lastMedian - 0.22;
 
-  // Ajustes adaptativos
-  if (trendDirection === "up") apuesta += 0.3;
+  // 🔹 Ajuste por tendencia
+  if (trendDirection === "up") apuesta += 0.25;
   else apuesta -= 0.1;
 
-  if (probs.low > 0.7) apuesta = 1.05; // Muchos crashes bajos → modo seguro
-  if (probs.high > 0.3) apuesta += 0.3;
+  // 🔹 Ajuste por probabilidades
+  if (probs.low > 0.6 && probs.high < 0.2) {
+    apuesta = 1.05 + Math.random() * 0.4; // modo seguro, pequeñas
+  } else if (probs.high > 0.25) {
+    apuesta += 0.3; // posible crash grande
+  }
 
-  apuesta = Math.min(Math.max(apuesta, 1.01), 3.0);
-  apuesta = parseFloat(apuesta.toFixed(2));
+  // 🔹 Ajuste por volatilidad actual
+  if (ind.volatility < 2) {
+    apuesta = 1.08 + Math.random() * 0.4; // rango bajo 1.08–1.48
+  } else if (ind.volatility >= 2 && ind.volatility < 5) {
+    apuesta = 1.3 + Math.random() * 0.6; // rango medio
+  } else {
+    apuesta = 1.8 + Math.random() * 1.0; // rango alto
+  }
 
-  // 🎯 Ajuste por confianza
-  if (predictionAccuracy < 0.4) apuesta = Math.max(1.05, apuesta - 0.1);
+  // 🔹 Confianza y control adaptativo
+  if (predictionAccuracy < 0.4) apuesta = Math.max(1.05, apuesta - 0.2);
   else if (predictionAccuracy > 0.7) apuesta += 0.2;
+
+  apuesta = Math.min(Math.max(apuesta, 1.03), 3.0);
+  apuesta = parseFloat(apuesta.toFixed(2));
 
   // 🌀 Rebote control
   if (ind.volatility < 1 && historyValues[0] > 10) {
@@ -226,7 +243,7 @@ function autoBetSmart() {
   if (!autoBetActive) {
     autoBetActive = true;
     currentTarget = apuesta;
-    console.log(`🎯 Apuesta configurada en ${apuesta}x (precisión ${(predictionAccuracy * 100).toFixed(0)}%)`);
+    console.log(`🎯 Apuesta activa: ${apuesta}x (precisión ${(predictionAccuracy * 100).toFixed(0)}%)`);
     betButton.click();
   }
 }
@@ -292,8 +309,8 @@ function startCrashAnalyzer() {
     console.warn("🛑 Analizador detenido.");
     return;
   }
-  console.log("✅ CRASH ANALYZER + AUTO BET v4.4 ULTRA INTELIGENTE iniciado.");
-  console.log("⚙️ Módulos: Probabilidad + Regresión + Confianza + Ciclo Adaptativo + Rebote");
+  console.log("✅ CRASH ANALYZER + AUTO BET v4.5 ULTRA INTELIGENTE iniciado.");
+  console.log("⚙️ Módulos: Modo Adaptativo Mixto + Probabilidad + Regresión + Confianza");
   monitorCrashCycle();
 }
 
