@@ -1,326 +1,484 @@
 // ===============================================================
-// 🧠 CRASH ANALYZER + AUTO BET v4.5 ULTRA INTELIGENTE
-// (Modo Adaptativo Mixto + Probabilidad + Regresión + Confianza + Ciclo)
-// Autor: Charly UNAM & GPT-5
+// 🧠 CRASH ANALYZER + AUTO BET v5.0 — ULTRA INTELIGENTE
+// - Autor: Charly UNAM & GPT-5 (reescrito v5.0)
+// - Reglas: no apostar si último crash < 1.49, track >10x en JSON,
+//          apuesta base 0.0001, modo agresivo basado en intervalos,
+//          "time target" como multiplier objetivo (ej. 2.0).
 // ===============================================================
 
-// === Variables globales ===
+/* ----------------------------
+   CONFIGURACIÓN (ajusta aquí)
+   ---------------------------- */
+const HISTORY_SELECTOR = '.styles_historyElement__3VTSn';      // historial (usa tu selector)
+const CRASH_SELECTOR = '#crash-payout-text';                  // donde aparece "Starts in" o "1.23x"
+const BET_BUTTON_SELECTOR = '.styles_text__2Xv67.styles_bigText__2ppQe'; // botón BET
+const BET_AMOUNT_INPUT_SELECTOR = 'input[name="bet-amount"]'; // opcional: si hay input para amount
+const USE_LOCALSTORAGE = true; // persistir datos entre sesiones
+
+// Parámetros básicos
+let baseBet = 0.0001;            // apuesta base solicitada
+let targetMultiplier = 2.0;      // "tiempo" objetivo (ej: 2.0x)
+let maxAggressionFactor = 4.0;   // hasta cuanto multiplicar la apuesta en modo agresivo
+let aggressiveMultiplierIncrease = 2.0; // cuánto se incrementa la apuesta en modo agresivo (factor)
+let minBet = 0.00000001;        // seguridad mínima
+let persistKey = 'crash_analyzer_v5_state'; // clave localStorage
+
+/* ----------------------------
+   ESTADO Y MEMORIA (JSON)
+   ---------------------------- */
 let stopAnalyzer = false;
 let stopAutoBet = false;
-let historyValues = [];
-let highVolatilityMemory = [];
-let lossStreak = 0;
-let lastCrashTime = null;
-let avgCycleTime = 6000;
-let expectedNext = null;
-let autoBetActive = false;
-let lastMedian = 2.0;
-let highVolatilityDetected = false;
-let lastHighVolatility = null;
-let currentTarget = null;
-let predictionAccuracy = 0.5;
-
-// === Estado general ===
+let historyValues = [];         // últimos valores del historial (p.ej. 11)
 let gameState = {
   roundActive: false,
-  currentCrash: 0.0,
-  lastCrash: 0.0,
+  lastCrash: null,              // último crash finalizado
+  currentCrash: 0,
   waitingNextStart: false,
 };
+let highCrashMemory = {         // memoria de grandes crashes > 10x
+  lastBigTimestamps: [],       // timestamps (ms)
+  avgInterval: null,           // avg ms entre >10x
+};
+let bettingSession = {          // stats en JSON
+  baseBet,
+  targetMultiplier,
+  totalRounds: 0,
+  betsPlaced: 0,
+  wins: 0,
+  losses: 0,
+  profit: 0,   // en la misma unidad de apuesta (ej 0.0001)
+  net: 0,
+  history: [],  // registro por ronda {ts, target, amount, result, crashValue}
+};
 
-// === Selectores ===
-const HISTORY_SELECTOR = '.styles_historyElement__3VTSn';
-const CRASH_SELECTOR = '#crash-payout-text';
-const BET_SELECTOR = '.styles_text__2Xv67.styles_bigText__2ppQe';
+// estado interno
+let autoBetActive = false;
+let currentTarget = null;
+let currentBetAmount = 0;
+let pendingBet = null; // {amount, target, placedTs}
 
-// === Obtener botón BET ===
-function getBetButton() {
-  return document.querySelector(BET_SELECTOR);
+/* ----------------------------
+   UTILIDADES
+   ---------------------------- */
+function saveState() {
+  if (!USE_LOCALSTORAGE) return;
+  const payload = {
+    highCrashMemory,
+    bettingSession,
+    baseBet,
+    targetMultiplier,
+  };
+  try { localStorage.setItem(persistKey, JSON.stringify(payload)); }
+  catch (e) { console.warn('No se pudo guardar estado en localStorage', e); }
 }
 
-// === Actualiza el historial (solo 11 últimos) ===
-function updateHistoryValues() {
-  const elements = document.querySelectorAll(HISTORY_SELECTOR);
-  const newValues = [];
-
-  elements.forEach(el => {
-    const value = parseFloat(el.innerText.trim());
-    if (!isNaN(value)) newValues.push(value);
-  });
-
-  if (newValues.length > 0) {
-    historyValues = [...new Set([...newValues, ...historyValues])];
-    if (historyValues.length > 11) historyValues = historyValues.slice(0, 11);
+function loadState() {
+  if (!USE_LOCALSTORAGE) return;
+  try {
+    const raw = localStorage.getItem(persistKey);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (parsed.highCrashMemory) highCrashMemory = parsed.highCrashMemory;
+    if (parsed.bettingSession) bettingSession = parsed.bettingSession;
+    if (parsed.baseBet) baseBet = parsed.baseBet;
+    if (parsed.targetMultiplier) targetMultiplier = parsed.targetMultiplier;
+    console.log('✅ Estado cargado desde localStorage.');
+  } catch (e) {
+    console.warn('No se pudo cargar estado:', e);
   }
 }
 
-// === Promedio ajustado ===
-function calculateAdjustedAverage() {
-  if (historyValues.length < 4) return { avg: 2.0, median: 2.0 };
-  const sorted = [...historyValues].sort((a, b) => a - b);
-  const trimmed = sorted.slice(1, sorted.length - 1);
-  const avg = trimmed.reduce((a, b) => a + b, 0) / trimmed.length;
-  const median = trimmed[Math.floor(trimmed.length / 2)];
-  lastMedian = median;
+// simple logger compacto
+function log(...args) { console.log('[CRASH v5]', ...args); }
+
+/* ----------------------------
+   HISTORIAL Y ESTADÍSTICAS
+   ---------------------------- */
+function updateHistoryValues() {
+  const elements = document.querySelectorAll(HISTORY_SELECTOR);
+  const newVals = [];
+  elements.forEach(el => {
+    const txt = el.innerText.trim();
+    const v = parseFloat(txt);
+    if (!isNaN(v)) newVals.push(v);
+  });
+  if (newVals.length > 0) {
+    // mantén únicos y orden (nuevo primero)
+    historyValues = [...new Set([...newVals, ...historyValues])].slice(0, 20);
+  }
+}
+
+// calcula promedio ajustado y mediana simple
+function calculateStatsFromHistory() {
+  if (historyValues.length === 0) return { avg: 2.0, median: 2.0 };
+  const arr = [...historyValues].sort((a,b)=>a-b);
+  const avg = arr.reduce((a,b)=>a+b,0)/arr.length;
+  const median = arr[Math.floor(arr.length/2)];
   return { avg, median };
 }
 
-// === Indicadores extendidos ===
-function getExtendedIndicators() {
-  if (historyValues.length < 5) return null;
-  const diffs = [];
-  for (let i = 1; i < historyValues.length; i++) diffs.push(historyValues[i] - historyValues[i - 1]);
-  const avgDiff = diffs.reduce((a, b) => a + b, 0) / diffs.length;
-  const upCount = diffs.filter(d => d > 0).length;
-  const downCount = diffs.filter(d => d < 0).length;
-  const volatility = Math.sqrt(diffs.map(d => d ** 2).reduce((a, b) => a + b, 0) / diffs.length);
-  const momentum = upCount / (upCount + downCount);
-  const trend = avgDiff > 0 ? "📈 Tendencia al alza" : "📉 Tendencia a la baja";
-  return { avgDiff, volatility, momentum, trend };
+/* ----------------------------
+   MEMORIA DE GRANDES CRASHES > 10x
+   ---------------------------- */
+function recordBigCrashIfAny(crashValue) {
+  if (crashValue > 10) {
+    const ts = Date.now();
+    highCrashMemory.lastBigTimestamps.push(ts);
+    // mantén solo últimos N
+    if (highCrashMemory.lastBigTimestamps.length > 30) highCrashMemory.lastBigTimestamps.shift();
+    // recalcular avg interval
+    const arr = highCrashMemory.lastBigTimestamps;
+    if (arr.length >= 2) {
+      const diffs = [];
+      for (let i=1;i<arr.length;i++) diffs.push(arr[i]-arr[i-1]);
+      const avg = diffs.reduce((a,b)=>a+b,0)/diffs.length;
+      highCrashMemory.avgInterval = avg;
+    }
+    saveState();
+    log('🚀 Registrado big crash >10x. avgInterval:', highCrashMemory.avgInterval);
+  }
 }
 
-// === Memoria probabilística ===
-function getCrashProbabilities() {
-  if (historyValues.length < 10) return { low: 0.5, high: 0.5 };
-  const low = historyValues.filter(v => v < 2).length / historyValues.length;
-  const high = historyValues.filter(v => v > 5).length / historyValues.length;
-  return { low, high };
-}
-
-// === Regresión lineal local (predicción de dirección) ===
-function linearPrediction() {
-  if (historyValues.length < 5) return null;
-  const n = historyValues.length;
-  const xs = [...Array(n).keys()];
-  const ys = historyValues;
-  const avgX = xs.reduce((a, b) => a + b, 0) / n;
-  const avgY = ys.reduce((a, b) => a + b, 0) / n;
-  const num = xs.map((x, i) => (x - avgX) * (ys[i] - avgY)).reduce((a, b) => a + b, 0);
-  const den = xs.map(x => (x - avgX) ** 2).reduce((a, b) => a + b, 0);
-  const slope = num / den;
-  return slope > 0 ? "up" : "down";
-}
-
-// === Actualiza confianza según resultado ===
-function updateConfidence(success) {
-  predictionAccuracy += success ? 0.05 : -0.05;
-  predictionAccuracy = Math.max(0.1, Math.min(0.9, predictionAccuracy));
-  console.log(`📊 Precisión adaptativa actual: ${(predictionAccuracy * 100).toFixed(1)}%`);
-}
-
-// === Actualiza tiempo promedio del ciclo ===
-function updateCycleTime() {
-  if (!lastCrashTime) return;
-  const diff = Date.now() - lastCrashTime;
-  avgCycleTime = avgCycleTime * 0.7 + diff * 0.3;
-  console.log(`⏱️ Tiempo promedio de ciclo actualizado: ${avgCycleTime.toFixed(0)} ms`);
-}
-
-// === Analiza memoria ===
-function checkMemoryPattern(currentIndicators) {
-  if (highVolatilityMemory.length < 5) return false;
-  const lastVols = highVolatilityMemory.map(m => m.volatility);
-  const avgVol = lastVols.reduce((a, b) => a + b, 0) / lastVols.length;
-  const recentHigh = highVolatilityMemory.filter(m => m.result > 5).length;
-  if (recentHigh >= 3 && Math.abs(currentIndicators.volatility - avgVol) < 1.2) {
-    console.log("🧠 Patrón aprendido detectado → posible crash alto inminente");
+/* ----------------------------
+   DECISIÓN: ¿apostar o no?
+   ---------------------------- */
+function shouldSkipNextBet() {
+  // Si no hay lastCrash conocido, no apostar por seguridad
+  const last = gameState.lastCrash;
+  if (last === null || last === undefined) {
+    log('⚠️ Último crash desconocido → no apostar (esperando datos).');
     return true;
   }
+  // regla principal: no apostar si el crash anterior fue < 1.49
+  if (last < 1.49) {
+    log(`⛔ Último crash ${last.toFixed(2)}x < 1.49 → saltando apuesta.`);
+    return true;
+  }
+  // Si memoria sugiere pausa (ej: estamos dentro de una ronda de caída), también saltar
+  // Puedes ampliar aquí lógica adicional.
   return false;
 }
 
-// === Estadísticas extendidas ===
-function getStats() {
-  const { avg, median } = calculateAdjustedAverage();
-  const variance = historyValues.map(v => Math.pow(v - avg, 2)).reduce((a, b) => a + b, 0) / historyValues.length;
-  const stdDev = Math.sqrt(variance);
-  const indicators = getExtendedIndicators();
-  if (!indicators) return;
-
-  if (indicators.volatility > 10) {
-    console.log("🚨 Alta volatilidad detectada:", indicators.volatility.toFixed(2));
-    highVolatilityMemory.push({
-      timestamp: Date.now(),
-      volatility: indicators.volatility,
-      result: historyValues[0] || 0,
-    });
-    if (highVolatilityMemory.length > 10) highVolatilityMemory.shift();
-    highVolatilityDetected = true;
-    lastHighVolatility = indicators.volatility;
-    historyValues = [];
-    expectedNext = null;
-    return;
-  } else {
-    highVolatilityDetected = false;
-    lastHighVolatility = null;
-  }
-
-  expectedNext = avg + (Math.random() - 0.5) * stdDev;
-  if (expectedNext <= 1) expectedNext = null;
-
-  console.log("📊 Estadísticas actuales:");
-  console.log(`• Promedio ajustado: ${avg.toFixed(2)}x`);
-  console.log(`• Mediana: ${median.toFixed(2)}x`);
-  console.log(`• Desviación estándar: ${stdDev.toFixed(2)}`);
-  console.log(`• Volatilidad: ${indicators.volatility.toFixed(2)}`);
-  console.log(`• Momentum: ${(indicators.momentum * 100).toFixed(1)}%`);
-  console.log(`• ${indicators.trend}`);
-  console.log("--------------------------------------------------");
-
-  window.lastIndicators = indicators;
+/* ----------------------------
+   MODO AGRESIVO (basado en avg interval de >10x)
+   ---------------------------- */
+function isAggressiveWindow() {
+  if (!highCrashMemory.avgInterval || highCrashMemory.lastBigTimestamps.length < 2) return false;
+  const lastTs = highCrashMemory.lastBigTimestamps[highCrashMemory.lastBigTimestamps.length - 1];
+  const sinceLast = Date.now() - lastTs;
+  // si hemos alcanzado, por ejemplo, el 80% del avgInterval, nos preparamos agresivamente
+  const threshold = 0.8 * highCrashMemory.avgInterval;
+  const aggressive = sinceLast >= threshold;
+  if (aggressive) log('🔥 Modo agresivo sugerido — time since last big:', (sinceLast/1000).toFixed(0),'s, avgInterval:', (highCrashMemory.avgInterval/1000).toFixed(0),'s');
+  return aggressive;
 }
 
-// === Apuesta automática inteligente v4.5 — Modo Adaptativo Mixto ===
-function autoBetSmart() {
-  if (stopAutoBet) return console.warn("🛑 AutoBet detenido manualmente.");
-  const ind = window.lastIndicators;
+/* ----------------------------
+   FUNCIONES DE APUESTA (simples)
+   - Intenta poner cantidad en input si existe.
+   - Hace click al botón BET.
+   ---------------------------- */
+function getBetButton() {
+  return document.querySelector(BET_BUTTON_SELECTOR);
+}
+
+function setBetAmountInInput(amount) {
+  const input = document.querySelector(BET_AMOUNT_INPUT_SELECTOR);
+  if (!input) return false;
+  try {
+    // forza valor incluso si disabled
+    input.removeAttribute('disabled');
+    input.value = amount;
+    // dispatch events
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  } catch (e) {
+    console.warn('No se pudo establecer la cantidad en input', e);
+    return false;
+  }
+}
+
+function placeBet(amount, target) {
+  // prepara bet
   const betButton = getBetButton();
-  if (!betButton) return console.warn("⚠️ No se encontró el botón BET.");
+  if (!betButton) { log('⚠️ Botón BET no encontrado.'); return false; }
 
-  // 🚨 Alta volatilidad → estrategia conservadora
-  if (highVolatilityDetected && lastHighVolatility) {
-    let apuesta = lastHighVolatility * 0.5;
-    apuesta = Math.min(Math.max(apuesta, 1.5), 8.0);
-    apuesta = parseFloat(apuesta.toFixed(2));
-    if (!autoBetActive) {
-      autoBetActive = true;
-      currentTarget = apuesta;
-      console.log(`⚡ Alta volatilidad → apuesta ${apuesta}x (modo defensivo)`);
-      betButton.click();
-    }
+  // intenta setear amount si hay input
+  const setOk = setBetAmountInInput(amount);
+  if (!setOk) {
+    // no hay input; solo informamos y click
+    log('🟡 No se encontró input de cantidad, se hará click en BET sin setear monto.');
+  }
+
+  // marcar pendingBet para evaluar resultado al finalizar ronda
+  pendingBet = {
+    amount,
+    target,
+    placedTs: Date.now(),
+  };
+  bettingSession.betsPlaced += 1;
+  saveState();
+
+  // click real
+  betButton.click();
+  log(`🎲 Apuesta colocada → amount ${amount} target ${target}x`);
+  return true;
+}
+
+/* ----------------------------
+   LÓGICA AUTO-BET (decidir cantidad y target por ronda)
+   ---------------------------- */
+function computeBetForRound() {
+  // base
+  let amount = baseBet;
+  // si estamos en modo agresivo, aumentamos la apuesta (pero con tope)
+  if (isAggressiveWindow()) {
+    amount = Math.min(baseBet * aggressiveMultiplierIncrease, baseBet * maxAggressionFactor);
+  }
+  // Asegurar mínimos
+  if (amount < minBet) amount = minBet;
+  // Target: el configurable targetMultiplier
+  const target = targetMultiplier;
+  return { amount, target };
+}
+
+function autoBetSmartIfNeeded() {
+  if (stopAutoBet) { log('🛑 AutoBet desactivado.'); return; }
+
+  // validaciones
+  if (shouldSkipNextBet()) {
+    autoBetActive = false;
     return;
   }
 
-  // 🧩 Datos insuficientes
-  if (!ind || !expectedNext || expectedNext <= 1) {
-    console.log("⚠️ Datos insuficientes, usando modo mini-apuesta (1.10x)");
-    if (!autoBetActive) {
-      autoBetActive = true;
-      currentTarget = 1.10;
-      betButton.click();
-    }
+  // no apostar si ya hay pending bet para esta ronda
+  if (pendingBet && gameState.roundActive) {
+    log('ℹ️ Ya hay una apuesta pendiente para esta ronda.');
     return;
   }
 
-  // 📊 Lógica adaptativa (modo mixto)
-  const probs = getCrashProbabilities();
-  const trendDirection = linearPrediction();
-  let apuesta = lastMedian - 0.22;
+  // decide apuesta
+  const { amount, target } = computeBetForRound();
 
-  // 🔹 Ajuste por tendencia
-  if (trendDirection === "up") apuesta += 0.25;
-  else apuesta -= 0.1;
-
-  // 🔹 Ajuste por probabilidades
-  if (probs.low > 0.6 && probs.high < 0.2) {
-    apuesta = 1.05 + Math.random() * 0.4; // modo seguro, pequeñas
-  } else if (probs.high > 0.25) {
-    apuesta += 0.3; // posible crash grande
-  }
-
-  // 🔹 Ajuste por volatilidad actual
-  if (ind.volatility < 2) {
-    apuesta = 1.08 + Math.random() * 0.4; // rango bajo 1.08–1.48
-  } else if (ind.volatility >= 2 && ind.volatility < 5) {
-    apuesta = 1.3 + Math.random() * 0.6; // rango medio
-  } else {
-    apuesta = 1.8 + Math.random() * 1.0; // rango alto
-  }
-
-  // 🔹 Confianza y control adaptativo
-  if (predictionAccuracy < 0.4) apuesta = Math.max(1.05, apuesta - 0.2);
-  else if (predictionAccuracy > 0.7) apuesta += 0.2;
-
-  apuesta = Math.min(Math.max(apuesta, 1.03), 3.0);
-  apuesta = parseFloat(apuesta.toFixed(2));
-
-  // 🌀 Rebote control
-  if (ind.volatility < 1 && historyValues[0] > 10) {
-    console.log("🌀 Posible rebote → cashout 1.5x forzado");
-    apuesta = 1.5;
-  }
-
-  if (!autoBetActive) {
+  // colocar apuesta (usar placeBet)
+  const ok = placeBet(amount, target);
+  if (ok) {
     autoBetActive = true;
-    currentTarget = apuesta;
-    console.log(`🎯 Apuesta activa: ${apuesta}x (precisión ${(predictionAccuracy * 100).toFixed(0)}%)`);
-    betButton.click();
+    currentTarget = target;
+    currentBetAmount = amount;
   }
 }
 
-// === Monitor de rondas ===
+/* ----------------------------
+   OBSERVADOR DEL CICLO (MutationObserver)
+   - Detecta "Starts in" → nueva ronda
+   - Detecta valores "1.23x" en tiempo real → monitor
+   - Al terminar la ronda (cuando aparece "Starts in" otra vez): resolvemos pendingBet
+   ---------------------------- */
+
 function monitorCrashCycle() {
   const payoutElement = document.querySelector(CRASH_SELECTOR);
-  if (!payoutElement) {
-    console.warn("⚠️ No se encontró el elemento principal del crash.");
-    return;
-  }
+  if (!payoutElement) { log('⚠️ No se encontró el elemento del payout/crash. Ajusta CRASH_SELECTOR.'); return; }
 
-  const observer = new MutationObserver(() => {
+  const observer = new MutationObserver(mutations => {
     const text = payoutElement.textContent.trim();
+    // caso "Starts in" -> nueva ronda a punto de empezar o la pantalla de espera
+    if (/Starts in/i.test(text) || /Starts in/.test(text)) {
+      // ronda finalizada recientemente, procesar pendingBet
+      if (gameState.roundActive || pendingBet) {
+        // resolvemos el resultado: si pendingBet existe y gameState.lastCrash lo informa
+        if (pendingBet) {
+          // si el último crash fue >= target -> ganaste
+          const last = gameState.lastCrash;
+          if (last !== null && last >= pendingBet.target) {
+            bettingSession.wins += 1;
+            bettingSession.profit += pendingBet.amount;
+            bettingSession.net = bettingSession.profit - (bettingSession.losses * pendingBet.amount);
+            log(`✅ GANASTE la apuesta. target ${pendingBet.target}x alcanzado (crash ${last}x). +${pendingBet.amount}`);
+          } else {
+            bettingSession.losses += 1;
+            bettingSession.profit -= pendingBet.amount;
+            bettingSession.net = bettingSession.profit - (0);
+            log(`❌ PERDISTE la apuesta. target ${pendingBet.target}x NO alcanzado (crash ${last}x). -${pendingBet.amount}`);
+          }
 
-    if (text.includes("Starts in")) {
-      if (!gameState.waitingNextStart) {
-        gameState.waitingNextStart = true;
-        gameState.roundActive = false;
-        gameState.lastCrash = gameState.currentCrash;
-        gameState.currentCrash = 0.0;
-        updateCycleTime();
-        updateHistoryValues();
-        getStats();
-        console.log(`🕒 Nueva ronda → último crash: ${gameState.lastCrash}x`);
-        autoBetActive = false;
-        currentTarget = null;
-        setTimeout(() => autoBetSmart(), 1000);
-      }
-    }
+          // guardar en history
+          bettingSession.history.push({
+            ts: Date.now(),
+            amount: pendingBet.amount,
+            target: pendingBet.target,
+            resultCrash: gameState.lastCrash,
+            win: (gameState.lastCrash !== null && gameState.lastCrash >= pendingBet.target),
+          });
+          bettingSession.totalRounds += 1;
 
-    else if (text.endsWith("x")) {
-      const currentCrash = parseFloat(text.replace("x", ""));
-      gameState.currentCrash = currentCrash;
-      if (!gameState.roundActive) {
-        gameState.roundActive = true;
-        gameState.waitingNextStart = false;
-      }
-
-      if (currentTarget && currentCrash >= currentTarget && autoBetActive) {
-        const betButton = getBetButton();
-        if (betButton) {
-          betButton.click();
-          autoBetActive = false;
-          updateConfidence(true);
-          console.log(`💸 Cashout automático en ${currentCrash.toFixed(2)}x`);
+          // limpiar pending
+          pendingBet = null;
           currentTarget = null;
+          currentBetAmount = 0;
+          saveState();
         }
       }
 
-      if (gameState.roundActive && currentCrash < (currentTarget || 1)) {
-        updateConfidence(false);
+      // estado para próxima ronda
+      gameState.roundActive = false;
+      gameState.waitingNextStart = true;
+
+      // decidir si en la espera se coloca apuesta previa (la acción de "bet" depende del sitio)
+      // esperamos un pequeño margen antes de ejecutar la lógica de apostar para no interferir
+      setTimeout(() => {
+        // si no está detenido, intentar autoBet
+        if (!stopAutoBet) autoBetSmartIfNeeded();
+      }, 800); // pequeño delay para dejar que el sitio procese
+
+      return;
+    }
+
+    // si el texto termina con 'x' entonces es el multiplicador actual en la ronda
+    const match = text.match(/([\d.]+)x$/);
+    if (match) {
+      const cur = parseFloat(match[1]);
+      if (!isNaN(cur)) {
+        gameState.currentCrash = cur;
+        // si la ronda estaba en espera, marcar activa
+        if (!gameState.roundActive) {
+          gameState.roundActive = true;
+          gameState.waitingNextStart = false;
+        }
+
+        // si hay un currentTarget y la ronda alcanza/excede -> intentamos clickear para cashout
+        if (currentTarget && autoBetActive && cur >= currentTarget) {
+          // aquí simulamos cashout con click en botón (algunos juegos requieren botón distinto)
+          const betButton = getBetButton();
+          if (betButton) {
+            try {
+              betButton.click();
+              log(`💸 Cashout automático en ${cur.toFixed(2)}x (target ${currentTarget}x)`);
+            } catch (e) {
+              console.warn('No se pudo clickear para cashout:', e);
+            }
+          }
+          // marcaremos el resultado al final de la ronda
+        }
       }
     }
   });
 
   observer.observe(payoutElement, { childList: true, subtree: true });
+  log('✅ Observador del ciclo iniciado.');
 }
 
-// === Iniciar analizador ===
+/* ----------------------------
+   OBSERVADOR PARA SABER EL "último crash" (cuando la tabla de historial se actualiza)
+   Esto detecta el momento en que la ronda finalizó y actualiza gameState.lastCrash
+   ---------------------------- */
+function monitorHistoryForLastCrash() {
+  const container = document.querySelector(HISTORY_SELECTOR)?.parentElement || document.body;
+  if (!container) { log('⚠️ No se encontró contenedor de historial para monitorizar.'); return; }
+
+  const hObserver = new MutationObserver(() => {
+    // leer la lista y tomar el primer elemento (más reciente)
+    const elements = document.querySelectorAll(HISTORY_SELECTOR);
+    if (!elements || elements.length === 0) return;
+    const first = elements[0];
+    const v = parseFloat(first.innerText.trim());
+    if (!isNaN(v) && v !== gameState.lastCrash) {
+      // actualizamos lastCrash y registramos si es >10x
+      gameState.lastCrash = v;
+      lastCrashTime = Date.now();
+      log('🧾 Nuevo crash registrado en historial:', v);
+      recordBigCrashIfAny(v);
+      updateHistoryValues();
+      saveState();
+    }
+  });
+
+  hObserver.observe(container, { childList: true, subtree: true, characterData: true });
+  log('✅ Observador de historial iniciado.');
+}
+
+/* ----------------------------
+   INICIO / STOP
+   ---------------------------- */
 function startCrashAnalyzer() {
-  if (stopAnalyzer) {
-    console.warn("🛑 Analizador detenido.");
-    return;
-  }
-  console.log("✅ CRASH ANALYZER + AUTO BET v4.5 ULTRA INTELIGENTE iniciado.");
-  console.log("⚙️ Módulos: Modo Adaptativo Mixto + Probabilidad + Regresión + Confianza");
+  stopAnalyzer = false;
+  stopAutoBet = false;
+  loadState();
+  updateHistoryValues();
   monitorCrashCycle();
+  monitorHistoryForLastCrash();
+  log('▶️ CRASH ANALYZER v5.0 iniciado.');
 }
 
-// === Iniciar ===
-startCrashAnalyzer();
+function stopCrashAnalyzer() {
+  stopAnalyzer = true;
+  stopAutoBet = true;
+  log('⏹️ CRASH ANALYZER detenido (manual).');
+}
 
-// ===============================================================
-// 🔧 COMANDOS MANUALES
-// stopAnalyzer = true;   → Detiene el sistema
-// stopAutoBet = true;    → Detiene el auto-bet
-// highVolatilityMemory   → Ver memoria de volatilidad aprendida
-// getStats()             → Ver estadísticas actuales
-// ===============================================================
+function resetStats() {
+  bettingSession = {
+    baseBet,
+    targetMultiplier,
+    totalRounds: 0,
+    betsPlaced: 0,
+    wins: 0,
+    losses: 0,
+    profit: 0,
+    net: 0,
+    history: [],
+  };
+  highCrashMemory = { lastBigTimestamps: [], avgInterval: null };
+  saveState();
+  log('🔄 Estadísticas reseteadas.');
+}
+
+/* ----------------------------
+   API simple para controlar desde consola
+   ---------------------------- */
+function setTargetMultiplier(x) {
+  targetMultiplier = parseFloat(x);
+  bettingSession.targetMultiplier = targetMultiplier;
+  saveState();
+  log('🎯 targetMultiplier set to', targetMultiplier);
+}
+
+function setBaseBet(x) {
+  baseBet = parseFloat(x);
+  bettingSession.baseBet = baseBet;
+  saveState();
+  log('💵 baseBet set to', baseBet);
+}
+
+function showStats() {
+  console.table({
+    baseBet,
+    targetMultiplier,
+    totalRounds: bettingSession.totalRounds,
+    betsPlaced: bettingSession.betsPlaced,
+    wins: bettingSession.wins,
+    losses: bettingSession.losses,
+    profit: bettingSession.profit,
+    net: bettingSession.net,
+    bigCrashCount: highCrashMemory.lastBigTimestamps.length,
+    avgBigCrashInterval_s: highCrashMemory.avgInterval ? (highCrashMemory.avgInterval/1000).toFixed(1) : 'N/A',
+  });
+  return { bettingSession, highCrashMemory, historyValues, gameState };
+}
+
+// Exponer funciones útiles en ventana global para control desde consola
+window.crashV5 = {
+  startCrashAnalyzer,
+  stopCrashAnalyzer,
+  setTargetMultiplier,
+  setBaseBet,
+  resetStats,
+  showStats,
+  bettingSession,
+  highCrashMemory,
+  getState: () => ({ bettingSession, highCrashMemory, historyValues, gameState }),
+};
+
+// auto-start (si quieres comentar la línea siguiente para no iniciar automáticamente, coméntala)
+startCrashAnalyzer();
