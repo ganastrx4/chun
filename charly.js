@@ -146,3 +146,117 @@ setInterval(() => {
   }
 
 }, 150);
+
+
+// ===============================================================
+// 📌 TRACKER DE SALDO — SE ACTIVA SOLO AL DETECTAR NUEVO CRASH
+// ===============================================================
+
+// JSON interno con máximo y último saldo
+let balanceTracker = {
+  maxBalance: 0,
+  lastBalance: 0
+};
+
+// Leer el saldo desde el DOM
+function getBalanceClean() {
+  const el = document.querySelector(".coinSelect_balance span");
+  if (!el) return null;
+  return parseFloat(el.innerText);
+}
+
+// Actualizar JSON y mostrar info
+function runBalanceTrackerOnce() {
+  const bal = getBalanceClean();
+  if (!bal) return;
+
+  balanceTracker.lastBalance = bal;
+
+  if (bal > balanceTracker.maxBalance) {
+    balanceTracker.maxBalance = bal;
+  }
+
+  const lost = balanceTracker.maxBalance - bal;
+
+  console.log("======================================");
+  console.log("💰 Saldo actual:", bal.toFixed(8));
+  console.log("📈 Máximo histórico:", balanceTracker.maxBalance.toFixed(8));
+  console.log("📉 Pérdida desde el máximo:", lost.toFixed(8));
+  console.log("======================================");
+}
+
+// ===============================================================
+// 🔥 DETECTOR DEL MENSAJE "NUEVO CRASH: XX"
+// ===============================================================
+
+// Observa la consola del juego
+(function() {
+  const originalLog = console.log;
+
+  console.log = function(...args) {
+    originalLog.apply(console, args);
+
+    // Convertir todo a minúsculas para que siempre coincida
+    const msg = String(args[0] || "").toLowerCase();
+
+    // Detectar “nuevo crash” sin importar mayúsculas
+    if (msg.includes("nuevo crash")) {
+      runBalanceTrackerOnce();
+    }
+  };
+})();
+
+
+
+
+
+// === 1) HACER LA ANIMACIÓN MÁS RÁPIDA ===
+const style = document.createElement("style");
+style.innerHTML = `
+.crashGameAnimation {
+    animation-duration: 0.0s !important;
+    transition-duration: 0.0s !important;
+}
+`;
+document.head.appendChild(style);
+
+// === 2) FUNCIÓN DE CASHOUT INSTANTÁNEO (LEYENDO EL VALOR REAL) ===
+function checkCashoutInstant() {
+    if (!gameState.roundActive) return;
+    if (!gameState.predicted) return;
+
+    const target = parseFloat(gameState.predicted.toFixed(2));
+
+    // LECTURA REAL DEL MULTIPLICADOR
+    const realCrash = parseFloat(
+        document.querySelector("#crash-payout-text")
+            ?.innerText.replace(/[^\d.]/g, "")
+    );
+
+    if (!realCrash || isNaN(realCrash)) return;
+
+    if (realCrash >= target) {
+        const btn = getCashoutButton();
+        if (btn) {
+            queueMicrotask(() => btn.click()); // velocísimo
+        }
+        gameState.predicted = null;
+    }
+}
+
+// === 3) DETECTOR DE FIN DE ANIMACIÓN DEL CRASH ===
+function attachAnimationEndWatcher() {
+    const el = document.querySelector("#crash-payout-text");
+    if (!el) return;
+
+    el.addEventListener("animationend", () => {
+        // Cuando la animación termine, revisamos inmediatamente el valor REAL
+        checkCashoutInstant();
+    });
+}
+
+// Ejecutamos esto cada 300ms para enganchar el listener cuando el h1 se regenere
+setInterval(attachAnimationEndWatcher, 300);
+
+
+
