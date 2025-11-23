@@ -1,6 +1,7 @@
 // ===============================================================
 // 🧠 CRASH ANALYZER + AUTO BET v5.1 (Cashout EXACTO + Pred redondeada)
 // Autor: Charly UNAM & GPT-5
+// MODIFICADO: Añadida impresión de Estrategia de Apuesta Fija
 // ===============================================================
 
 // === Estado general ===
@@ -10,6 +11,12 @@ let gameState = {
   lastCrash: 0.0,
   waitingNextStart: false,
   predicted: null
+};
+
+// === Estrategia de Apuesta (Fija para Maximizar el Histórico) ===
+const STRATEGY = {
+  BET_AMOUNT: "MIN", // Usar el botón 'min' o un valor fijo bajo (ej. 0.00001920)
+  PAYOUT_TARGET: 1.20 // Objetivo de Payout bajo para alta tasa de victorias
 };
 
 // === Selectores ===
@@ -28,7 +35,6 @@ function getBetButton() {
 }
 
 // === BOTÓN CASHOUT ===
-// Buscamos el botón exacto que aparece con texto “Cashout”
 function getCashoutButton() {
   return document.evaluate(
     "//div[text()='Cashout']/parent::button",
@@ -96,7 +102,7 @@ function updateCrashState() {
   }
 }
 
-// === APOSTAR ===
+// === APOSTAR (Solo click, sin configurar montos) ===
 function tryBet() {
   if (!gameState.waitingNextStart) return;
   const betBtn = getBetButton();
@@ -108,21 +114,18 @@ function tryBet() {
 }
 
 // === CASHOUT EXACTO ===
-// SI EL BOTÓN “Cashout” EXISTE → cashoutBtn != null
-// SI EL CRASH ACTUAL >= predicción → HACER CLICK
 function checkCashout() {
   if (!gameState.roundActive) return;
-  if (!gameState.predicted) return;
 
-  const target = parseFloat(gameState.predicted.toFixed(2));
+  // Usamos el target fijo de la estrategia (1.20) para el cashout automático
+  const target = STRATEGY.PAYOUT_TARGET; 
   const current = gameState.currentCrash;
 
   if (current >= target) {
     const cashoutBtn = getCashoutButton();
     if (cashoutBtn) {
-      console.log(`💰 CASHOUT ACTIVADO en ${current}x (pred ${target})`);
+      console.log(`💰 CASHOUT AUTOMÁTICO ACTIVADO en ${current}x (Objetivo ${target}x)`);
       cashoutBtn.click();
-      gameState.predicted = null;
     }
   }
 }
@@ -132,15 +135,26 @@ setInterval(() => {
   updateCrashState();
 
   if (!gameState.roundActive && gameState.waitingNextStart) {
+    // Si la ronda terminó y estamos esperando, intentamos apostar
     tryBet();
   }
 
+  // Si la ronda terminó y no hemos calculado la predicción/estrategia
   if (!gameState.roundActive && !gameState.waitingNextStart) {
     const pred = calculatePrediction();
     gameState.predicted = pred;
-
-    console.log("🔥 NUEVO CRASH:", gameState.currentCrash);
-    console.log("📊 Predicción:", pred.toFixed(2));
+    
+    // -------------------------------------------------------------------
+    // 💡 IMPRESIÓN DE DATOS CLAVE
+    // -------------------------------------------------------------------
+    console.log("======================================");
+    console.log(`🔥 NUEVO CRASH FINALIZADO: ${gameState.currentCrash.toFixed(2)}x`);
+    console.log("📊 Predicción (Análisis ES):", pred.toFixed(2));
+    console.log("--- ESTRATEGIA PARA MAXIMIZAR SALDO ---");
+    console.log(`➡️ Payout Objetivo: ${STRATEGY.PAYOUT_TARGET.toFixed(2)}x (Para Cashout)`);
+    console.log(`➡️ Monto de Apuesta: ${STRATEGY.BET_AMOUNT} (Sugerencia Manual)`);
+    console.log("======================================");
+    // -------------------------------------------------------------------
 
     gameState.waitingNextStart = true;
   }
@@ -162,7 +176,9 @@ let balanceTracker = {
 function getBalanceClean() {
   const el = document.querySelector(".coinSelect_balance span");
   if (!el) return null;
-  return parseFloat(el.innerText);
+  // Intenta limpiar el texto del saldo, asumiendo que es el formato de 8 decimales
+  const text = el.innerText.replace(/[^\d.]/g, "");
+  return parseFloat(text);
 }
 
 // Actualizar JSON y mostrar info
@@ -178,37 +194,39 @@ function runBalanceTrackerOnce() {
 
   const lost = balanceTracker.maxBalance - bal;
 
-  console.log("======================================");
-  console.log("💰 Saldo actual:", bal.toFixed(8));
-  console.log("📈 Máximo histórico:", balanceTracker.maxBalance.toFixed(8));
-  console.log("📉 Pérdida desde el máximo:", lost.toFixed(8));
-  console.log("======================================");
+  console.log("📈 MÁXIMO HISTÓRICO ACTUALIZADO");
+  console.log(`💰 Saldo actual: ${bal.toFixed(8)}`);
+  console.log(`📈 Máximo histórico: ${balanceTracker.maxBalance.toFixed(8)}`);
+  console.log(`📉 Pérdida desde el máximo: ${lost.toFixed(8)}`);
+  console.log("--------------------------------------");
 }
 
-// ===============================================================
-// 🔥 DETECTOR DEL MENSAJE "NUEVO CRASH: XX"
-// ===============================================================
+// =AFECTACIÓN AL CÓDIGO ORIGINAL=
+// Se reemplaza la impresión del Balance Tracker por la que se hace
+// en el LOOP PRINCIPAL, ya que es más limpia.
+// ===============================
 
-// Observa la consola del juego
+// Modificación del detector de mensajes para solo llamar al tracker
 (function() {
   const originalLog = console.log;
 
   console.log = function(...args) {
     originalLog.apply(console, args);
 
-    // Convertir todo a minúsculas para que siempre coincida
+    // Detección de la línea de la estrategia
     const msg = String(args[0] || "").toLowerCase();
 
-    // Detectar “nuevo crash” sin importar mayúsculas
-    if (msg.includes("nuevo crash")) {
+    // Detectar el inicio de la impresión de la estrategia
+    if (msg.includes("--- estrategia para maximizar saldo ---")) {
       runBalanceTrackerOnce();
     }
   };
 })();
 
 
-
-
+// ===============================================================
+// 🔥 OPTIMIZACIONES DE CASHOUT INSTANTÁNEO (MANTIENE EL CÓDIGO)
+// ===============================================================
 
 // === 1) HACER LA ANIMACIÓN MÁS RÁPIDA ===
 const style = document.createElement("style");
@@ -223,9 +241,9 @@ document.head.appendChild(style);
 // === 2) FUNCIÓN DE CASHOUT INSTANTÁNEO (LEYENDO EL VALOR REAL) ===
 function checkCashoutInstant() {
     if (!gameState.roundActive) return;
-    if (!gameState.predicted) return;
-
-    const target = parseFloat(gameState.predicted.toFixed(2));
+    
+    // Usamos el target fijo de la estrategia (1.20)
+    const target = STRATEGY.PAYOUT_TARGET;
 
     // LECTURA REAL DEL MULTIPLICADOR
     const realCrash = parseFloat(
@@ -240,7 +258,6 @@ function checkCashoutInstant() {
         if (btn) {
             queueMicrotask(() => btn.click()); // velocísimo
         }
-        gameState.predicted = null;
     }
 }
 
@@ -257,6 +274,3 @@ function attachAnimationEndWatcher() {
 
 // Ejecutamos esto cada 300ms para enganchar el listener cuando el h1 se regenere
 setInterval(attachAnimationEndWatcher, 300);
-
-
-
