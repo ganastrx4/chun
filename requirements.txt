@@ -4,3 +4,4 @@ requests
 pymongo
 dnspython
 gunicorn
+eth-account
