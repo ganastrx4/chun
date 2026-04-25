@@ -1,4 +1,5 @@
 ccxt
 pandas
 numpy
-ta 
+ta
+flask
