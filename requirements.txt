@@ -1,7 +1,4 @@
-flask
-flask-cors
-requests
-pymongo
-dnspython
-gunicorn
-eth-account
+ccxt
+pandas
+numpy
+ta 
