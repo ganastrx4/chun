@@ -201,10 +201,10 @@ def signal(df, ob):
     if ob < -0.18:
         score -= 1
 
-    if score >= 2:
+    if score >= 1:
         return "LONG"
 
-    if score <= -2:
+    if score <= -1:
         return "SHORT"
 
     return "NEUTRAL"
