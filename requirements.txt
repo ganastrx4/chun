@@ -3,3 +3,5 @@ pandas
 numpy
 ta
 flask
+python-binance
+numpy
