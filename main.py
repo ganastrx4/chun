@@ -9,74 +9,68 @@ from flask import Flask
 from datetime import datetime
 
 # ===============================================================
-# CONFIGURACIÓN AVANZADA
+# CONFIGURACIÓN PROD - RENDER (Referencia image_1c2953.png)
 # ===============================================================
 API_KEY = os.getenv("BINANCE_API_KEY")
 API_SECRET = os.getenv("BINANCE_SECRET_KEY")
+
+# Inicialización segura del cliente
 client = Client(API_KEY, API_SECRET)
 
 WATCH = ["WLDUSDT", "XRPUSDT"]
-BASE_USDT = 6.0       # Margen inicial un poco más alto
-MAX_MARGIN_TOTAL = 100 # Permitir que promedie hasta 100 USDT si es necesario
+BASE_USDT = 6.0       # Margen inicial
+MAX_MARGIN_TOTAL = 100 # Techo de DCA
 LEVERAGE = 75
 
-# Memoria de racha y liquidez
 market_memory = {s: {"high_1m": 0, "low_1m": 0, "last_action": None} for s in WATCH}
 
 app = Flask(__name__)
 
 # ===============================================================
-# RED NEURONAL DE LIQUIDEZ Y REBOTE (1m)
+# LÓGICA DE ANÁLISIS (IA & LIQUIDEZ)
 # ===============================================================
 
 def analizar_liquidez(symbol):
-    """Detecta si el precio llegó a una zona de rebote por agotamiento de volumen"""
-    k_1m = client.futures_klines(symbol=symbol, interval='1m', limit=20)
-    closes = np.array([float(x[4]) for x in k_1m])
-    volumes = np.array([float(x[5]) for x in k_1m])
-    
-    # Detección de agotamiento: Precio sube pero volumen baja (Divergencia)
-    vol_trend = np.polyfit(range(len(volumes[-5:])), volumes[-5:], 1)[0]
-    price_trend = np.polyfit(range(len(closes[-5:])), closes[-5:], 1)[0]
-    
-    # Si el precio sube con fuerza pero el volumen cae, viene un rebote
-    if price_trend > 0 and vol_trend < 0:
-        return "REBOTE_BAJISTA"
-    if price_trend < 0 and vol_trend < 0:
-        return "REBOTE_ALCISTA"
-    
-    return "NORMAL"
+    """Detecta agotamiento: Precio sube pero volumen baja"""
+    try:
+        k_1m = client.futures_klines(symbol=symbol, interval='1m', limit=20)
+        closes = np.array([float(x[4]) for x in k_1m])
+        volumes = np.array([float(x[5]) for x in k_1m])
+        
+        # Tendencias de los últimos 5 periodos
+        vol_trend = np.polyfit(range(len(volumes[-5:])), volumes[-5:], 1)[0]
+        price_trend = np.polyfit(range(len(closes[-5:])), closes[-5:], 1)[0]
+        
+        if price_trend > 0 and vol_trend < 0:
+            return "REBOTE_BAJISTA"
+        if price_trend < 0 and vol_trend < 0:
+            return "REBOTE_ALCISTA"
+        return "NORMAL"
+    except:
+        return "NORMAL"
 
 def neurona_consenso_pro(symbol):
-    # Confirmación en 5m para tendencia pesada
-    k5 = client.futures_klines(symbol=symbol, interval='5m', limit=15)
-    c5 = np.array([float(x[4]) for x in k5])
-    
-    # Acción rápida en 1m
-    k1 = client.futures_klines(symbol=symbol, interval='1m', limit=10)
-    c1 = np.array([float(x[4]) for x in k1])
-    v1 = np.array([float(x[5]) for x in k1])
-
-    # Fuerza del mercado
-    ema_corta = np.mean(c1[-3:])
-    ema_larga = np.mean(c1[-10:])
-    
-    vol_status = analizar_liquidez(symbol)
-    
-    # Lógica Humana: No entres si hay agotamiento
-    if ema_corta > ema_larga and vol_status != "REBOTE_BAJISTA":
-        return "BULLISH"
-    if ema_corta < ema_larga and vol_status != "REBOTE_ALCISTA":
-        return "BEARISH"
-    
-    return "NEUTRAL"
+    try:
+        k1 = client.futures_klines(symbol=symbol, interval='1m', limit=10)
+        c1 = np.array([float(x[4]) for x in k1])
+        
+        ema_corta = np.mean(c1[-3:])
+        ema_larga = np.mean(c1[-10:])
+        vol_status = analizar_liquidez(symbol)
+        
+        if ema_corta > ema_larga and vol_status != "REBOTE_BAJISTA":
+            return "BULLISH"
+        if ema_corta < ema_larga and vol_status != "REBOTE_ALCISTA":
+            return "BEARISH"
+        return "NEUTRAL"
+    except:
+        return "NEUTRAL"
 
 # ===============================================================
-# MOTOR DE EJECUCIÓN CON PROMEDIO DINÁMICO
+# MOTOR DE EJECUCIÓN
 # ===============================================================
 
 def execute_logic(symbol):
-    # 1. Obtener estado de cuenta y posición
     pos = client.futures_position_information(symbol=symbol)
     l_amt, s_amt, l_pnl, s_pnl, l_margin, s_margin = 0, 0, 0, 0, 0, 0
     
@@ -86,7 +80,7 @@ def execute_logic(symbol):
             l_amt = amt
             l_pnl = float(p["unRealizedProfit"])
             l_margin = float(p["isolatedMargin"])
-        if amt < 0: 
+        elif amt < 0: 
             s_amt = abs(amt)
             s_pnl = float(p["unRealizedProfit"])
             s_margin = float(p["isolatedMargin"])
@@ -95,33 +89,29 @@ def execute_logic(symbol):
     prediction = neurona_consenso_pro(symbol)
     vol_status = analizar_liquidez(symbol)
     
-    # 2. CIERRE INTELIGENTE (EL "HUMANO")
-    # Si detectamos rebote inminente, cerramos ganancia DE GOLPE
+    # CIERRE POR AGOTAMIENTO
     if (l_amt > 0 and vol_status == "REBOTE_BAJISTA" and l_pnl > 0.10):
         client.futures_create_order(symbol=symbol, side='SELL', type='MARKET', quantity=l_amt, positionSide='LONG')
-        print(f"🧠 {symbol} Cierre por Agotamiento detectado (Long)")
+        print(f"🧠 {symbol} Cierre por Agotamiento (Long)")
         return
 
     if (s_amt > 0 and vol_status == "REBOTE_ALCISTA" and s_pnl > 0.10):
         client.futures_create_order(symbol=symbol, side='BUY', type='MARKET', quantity=s_amt, positionSide='SHORT')
-        print(f"🧠 {symbol} Cierre por Agotamiento detectado (Short)")
+        print(f"🧠 {symbol} Cierre por Agotamiento (Short)")
         return
 
-    # 3. GESTIÓN DE PÉRDIDA / PROMEDIO (DCA)
-    # Si perdemos más del 15% del margen actual, y la tendencia sigue a favor, promediamos
+    # GESTIÓN DCA (PROMEDIO)
     current_pnl_pct = (l_pnl / l_margin) if l_margin > 0 else (s_pnl / s_margin) if s_margin > 0 else 0
     
-    if current_pnl_pct < -0.25: # Perdiendo más del 25%
+    if current_pnl_pct < -0.25:
         if l_margin + s_margin < MAX_MARGIN_TOTAL:
             qty = round(BASE_USDT / price, 2)
             if l_amt > 0 and prediction == "BULLISH":
                 client.futures_create_order(symbol=symbol, side='BUY', type='MARKET', quantity=qty, positionSide='LONG')
-                print(f"🛠️ Promediando LONG en {symbol}")
             elif s_amt > 0 and prediction == "BEARISH":
                 client.futures_create_order(symbol=symbol, side='SELL', type='MARKET', quantity=qty, positionSide='SHORT')
-                print(f"🛠️ Promediando SHORT en {symbol}")
 
-    # 4. ENTRADAS NUEVAS (Solo si no hay nada abierto)
+    # NUEVAS ENTRADAS
     if l_amt == 0 and s_amt == 0 and prediction != "NEUTRAL":
         qty = round(BASE_USDT / price, 2)
         p_side = 'LONG' if prediction == "BULLISH" else 'SHORT'
@@ -129,8 +119,9 @@ def execute_logic(symbol):
         client.futures_create_order(symbol=symbol, side=side, type='MARKET', quantity=qty, positionSide=p_side)
 
 # ===============================================================
-# DASHBOARD PARA RENDER
+# DASHBOARD & SERVER
 # ===============================================================
+
 @app.route("/")
 def home():
     try:
@@ -148,16 +139,23 @@ def home():
             html += f"<b>{p['symbol']}</b> | PNL: <span style='color:{color}'>{round(pnl, 2)} USDT</span><br>"
             html += f"Margen: {round(float(p['isolatedMargin']), 2)} USDT</div>"
         return html + "</body>"
-    except Exception as e: return str(e)
+    except Exception as e: 
+        return f"Error: {str(e)}"
 
 def bot_loop():
     while True:
         for s in WATCH:
-            try: execute_logic(s)
-            except Exception as e: print(f"Error {s}: {e}")
+            try: 
+                execute_logic(s)
+            except Exception as e: 
+                print(f"Error en loop {s}: {e}")
             time.sleep(1)
         time.sleep(5)
 
 if __name__ == "__main__":
+    # Iniciar el bot en un hilo separado
     threading.Thread(target=bot_loop, daemon=True).start()
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    
+    # Render usa el puerto 10000 por defecto según tu imagen
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
